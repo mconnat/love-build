@@ -6,6 +6,10 @@ if [ "${GITHUB_REPOSITORY}" = "nhartland/love-build" ]; then
     set -x
 fi
 
+if [ "${GITHUB_REPOSITORY}" = "mconnat/love-build" ]; then
+    set -x
+fi
+
 check_environment() {
     : "${INPUT_APP_NAME:?'Error: application name unset'}"
     : "${INPUT_LOVE_VERSION:?'Error: love version unset'}"
@@ -24,6 +28,29 @@ get_love_binaries() {
     wget "${glb_root_url}/${INPUT_LOVE_VERSION}/love-${INPUT_LOVE_VERSION}-${glb_arch}.zip"
     unzip "love-${INPUT_LOVE_VERSION}-${glb_arch}.zip" 
     rm "love-${INPUT_LOVE_VERSION}-${glb_arch}.zip" 
+}
+
+build_webarchive(){
+    blf_target=$1
+    blf_build_dir=$(mktemp -d -t web-build-XXXXXX)
+    cp -a "${SOURCE_DIR}/." "${blf_build_dir}"
+    (
+        # Change to build dir (subshell to preserve cwd)
+        cd "${blf_build_dir}" 
+        # If the specified dependency file exists, use it 
+        if [ -n "${INPUT_DEPENDENCIES}" ]; then
+            depsfile="${GITHUB_WORKSPACE}/${INPUT_DEPENDENCIES}"
+            # Build the dependencies into a local luarocks tree
+            luarocks make "${depsfile}" --deps-mode one --lua-version=5.1 --tree lb_modules 
+            # Add custom require paths
+            cat /love-build/module_loader.lua main.lua > new_main.lua
+            mv new_main.lua main.lua
+        fi
+        npx love.js . "${INPUT_APP_NAME}" --title "${INPUT_APP_NAME}" -c
+        zip -r "${INPUT_APP_NAME}.zip" ./* -x '*.git*' "${RESULT_DIR}/*"
+    )
+    mv "${blf_build_dir}/${INPUT_APP_NAME}.zip" "${blf_target}"
+    rm -rf "${blf_build_dir}"
 }
 
 # Exports a .love file for the application to the path specified as an
@@ -149,6 +176,11 @@ main() {
     
     build_lovefile "${RESULT_DIR}/${INPUT_APP_NAME}.love"
     echo "love-filename=${INPUT_RESULT_DIR}/${INPUT_APP_NAME}.love" >> $GITHUB_OUTPUT
+
+    ### Web build ####################################################
+    
+    build_webarchive "${RESULT_DIR}/${INPUT_APP_NAME}.zip"
+    echo "web-filename=${INPUT_RESULT_DIR}/${INPUT_APP_NAME}.zip" >> $GITHUB_OUTPUT
     
     ### macOS/win builds ##############################################
     
